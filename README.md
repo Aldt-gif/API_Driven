@@ -83,3 +83,103 @@ Cet atelier, **noté sur 20 points**, est évalué sur la base du barème suivan
 - Degré d'automatisation du projet (utilisation de Makefile ? script ? ...) (4 points)
 - Qualité du Readme (lisibilité, erreur, ...) (4 points)
 - Processus travail (quantité de commits, cohérence globale, interventions externes, ...) (4 points) 
+
+
+
+
+
+
+
+# API-Driven Infrastructure
+
+Ce projet permet de démarrer ou arreter une instance EC2 en envoyant une simple requête HTTP.
+La requête passe par une API, qui appelle une fonction Lambda, qui agit ensuite sur l'instance EC2.
+
+Tout fonctionne dans un environnement AWS simulé avec LocalStack, exécuté dans GitHub Codespaces.
+L'objectif est de montrer qu'on peut piloter une infrastructure cloud uniquement par une API, sans utiliser d'interface graphique.
+
+## Architecture
+- API Gateway reçoit la requête HTTP et la transmet à la Lambda.
+- La fonction Lambda lit l'action demandée (start ou stop) et l'envoie à EC2.
+- L'instance EC2 démarre ou s'arrête selon l'action reçue.
+
+## Prérequis
+
+- Un environnement GitHub Codespaces (ou Docker en local).
+- LocalStack installé (émulateur AWS).
+- Un token LocalStack (gratuit sur https://app.localstack.cloud/).
+- L'outil awslocal : `pip install awscli-local`
+
+## Installation et démarrage
+
+### 1. Créer un réseau Docker dédié
+
+La fonction Lambda et LocalStack doivent communiquer entre eux.
+Pour cela, on crée un réseau Docker et on y connecte LocalStack.
+
+```bash
+docker network create ls-net
+```
+
+### 2. Démarrer LocalStack sur ce réseau
+
+On lance LocalStack en lui indiquant d'utiliser le réseau `ls-net` pour les Lambda.
+
+```bash
+export LAMBDA_DOCKER_NETWORK=ls-net
+localstack auth set-token "il faut mettre votre token"
+localstack start -d
+docker network connect ls-net localstack-main
+```
+
+### 3. Lancer le script d'installation
+
+Ce script crée automatiquement toute l'infrastructure : l'instance EC2, la fonction Lambda et l'API Gateway.
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+À la fin, le script affiche l'ID de l'instance EC2, l'ID de l'API, et les commandes à utiliser pour tester.
+
+## Utilisation
+
+Une fois l'infrastructure prête, on pilote l'instance EC2 avec des requêtes HTTP.
+Remplacez `<API_ID>` et `<INSTANCE_ID>` par les valeurs affichées à la fin du script.
+
+### Arrêter l'instance
+
+```bash
+curl "http://localhost:4566/_aws/execute-api/<API_ID>/dev/ec2?action=stop&instance_id=<INSTANCE_ID>"
+```
+
+Réponse attendue :
+
+```json
+{"message": "Instance i-xxxxx arretee"}
+```
+
+### Démarrer l'instance
+
+```bash
+curl "http://localhost:4566/_aws/execute-api/<API_ID>/dev/ec2?action=start&instance_id=<INSTANCE_ID>"
+```
+
+### Vérifier l'état de l'instance
+
+```bash
+awslocal ec2 describe-instances --query "Reservations[].Instances[].State.Name" --output text
+```
+
+Cette commande affiche `running` (démarrée) ou `stopped` (arrêtée).
+
+## Comment ça marche
+
+Le projet repose sur trois services AWS qui travaillent ensemble :
+
+- API Gateway : c'est la porte d'entrée. Il reçoit la requête HTTP et récupère les paramètres `action` et `instance_id` dans l'URL.
+- Fonction Lambda : c'est le cerveau. Elle lit l'action demandée, se connecte à EC2 grâce à la librairie `boto3`, puis lance ou arrête l'instance.
+- Instance EC2 : c'est la ressource pilotée. Elle change d'état (démarrée ou arrêtée) selon l'action reçue.
+
+La fonction Lambda communique avec EC2 via l'adresse interne `http://localstack-main:4566`, ce qui est possible grâce au réseau Docker `ls-net` configuré à l'installation.
