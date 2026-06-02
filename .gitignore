@@ -1,0 +1,7 @@
+# Fichiers temporaires
+response.json
+*.zip
+rep_localstack/
+
+# Token / secrets
+.env
